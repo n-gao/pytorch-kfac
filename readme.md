@@ -45,6 +45,8 @@ This implies that `torch.optim.lr_scheduler` are not available for KFAC. However
 
 * Only track forward and backward pass when needed. This could be done with context managers like: `with kfac.track_forward():` and `with kfac.track_backward():`.
 
+* Add support for distributed training
+
 ## References
 ### Orignal Repsotiry
 [tensorflow/kfac](https://github.com/tensorflow/kfac)
