@@ -1,3 +1,4 @@
+from typing import Iterable, Tuple
 import torch
 from torch.functional import norm
 from torch.serialization import normalize_storage_type
@@ -100,3 +101,16 @@ def inverse_by_cholesky(tensor: torch.Tensor, damping: torch.Tensor) -> torch.Te
     damped = tensor + torch.eye(tensor.shape[-1], device=tensor.device, dtype=tensor.dtype) * damping
     cholesky = torch.cholesky(damped)
     return torch.cholesky_inverse(cholesky)
+
+
+def scalar_product_pairs(scalar, list_: Iterable[Tuple[Iterable[torch.Tensor], object]]) -> Iterable[Tuple[Iterable[torch.Tensor], object]]:
+    return tuple((tuple(scalar*item for item in items), var) for items, var in list_)
+
+def inner_product(list1: Iterable[torch.Tensor], list2: Iterable[torch.Tensor]) -> torch.Tensor:
+    return sum((tensor1 * tensor2).sum() for tensor1, tensor2 in zip(list1, list2))
+
+def inner_product_pairs(list1: Iterable[Tuple[Iterable[torch.Tensor], object]], list2: Iterable[Tuple[Iterable[torch.Tensor], object]]):
+    return inner_product(
+        tuple(tensor for tensors, _ in list1 for tensor in tensors),
+        tuple(tensor for tensors, _ in list2 for tensor in tensors)
+    )
