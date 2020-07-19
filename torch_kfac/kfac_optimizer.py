@@ -159,8 +159,6 @@ class KFAC(object):
             if self.use_norm_constraint:
                 raw_updates_and_layers = self._clip_updates(grads_and_layers, raw_updates_and_layers)
 
-            # print(raw_updates_and_layers)
-
             # Update velocities
             if self.use_momentum:
                 raw_updates_and_layers = self._update_velocities(raw_updates_and_layers, self._momentum)
