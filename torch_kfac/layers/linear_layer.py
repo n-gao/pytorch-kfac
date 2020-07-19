@@ -47,26 +47,19 @@ class LinearLayer(Layer):
         self._activations_cov.add_to_average(activation_cov)
         self._sensitivities_cov.add_to_average(sensitivity_cov)
 
-    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
-        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
-        a_damp, s_damp = self.compute_damping(damping)
-        act_cov_inverse = inverse_by_cholesky(act_cov, a_damp)
-        sen_cov_inverse = inverse_by_cholesky(sen_cov, s_damp)
-
-        # Concatenate weights and biases
+    def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         if self.has_bias:
             weights, bias = grads
-            grads = torch.cat([weights, bias[:, None]], -1)
+            mat_grads = torch.cat([weights, bias[:, None]], -1)
         else:
-            grads = grads[0]
+            mat_grads = grads[0]
+        return mat_grads
 
-        nat_grads = sen_cov_inverse @ grads @ act_cov_inverse
-
-        # Split up again
+    def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
         if self.has_bias:
-            return nat_grads[:, :-1], nat_grads[:, -1]
+            return mat_grads[:, :-1], mat_grads[:, -1]
         else:
-            return nat_grads,
+            return mat_grads,
 
     @property
     def has_bias(self) -> None:

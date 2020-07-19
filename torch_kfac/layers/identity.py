@@ -16,6 +16,9 @@ class IdentityLayer(Layer):
     def update_cov(self):
         return
 
+    def multiply(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+        return grads
+
     def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
         return grads
         

@@ -137,7 +137,7 @@ class KFAC(object):
         return tuple(_update_velocity(grads, layer) for grads, layer in grads_and_layers)
 
     def _compute_approx_qmodel_change(self, updates_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> torch.Tensor:
-        quad_term = 0.5 * inner_product_pairs(updates_and_layers, grads_and_layers)
+        quad_term = 0.5 * inner_product_pairs(updates_and_layers, tuple((layer.multiply(grads, self.damping), layer) for grads, layer in grads_and_layers))
         linear_term = inner_product_pairs(updates_and_layers, grads_and_layers)
         if not self._include_damping_in_qmodel_change:
             quad_term -= 0.5 * self._sub_damping_out_qmodel_change_coeff * self.damping * linear_term

@@ -1,4 +1,4 @@
-from torch_kfac.utils.utils import compute_pi_adjusted_damping, kronecker_product, normalize_damping
+from torch_kfac.utils.utils import compute_pi_adjusted_damping, inverse_by_cholesky, kronecker_product, normalize_damping
 from typing import Iterable, Tuple
 import torch
 
@@ -41,9 +41,34 @@ class Layer(object):
         self._activations_cov.reset()
         self._sensitivities_cov.reset()
 
-    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+    def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         raise NotImplementedError()
 
+    def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError()
+
+    def multiply(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
+        a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
+        act_cov += torch.eye(act_cov.shape[0]) * a_damp
+        sen_cov += torch.eye(sen_cov.shape[0]) * s_damp
+
+        mat_grads = self.grads_to_mat(grads)
+        nat_grads = sen_cov @ mat_grads @ act_cov / self.renorm_coeff
+
+        return self.mat_to_grads(nat_grads)
+        
+    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
+        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
+        a_damp, s_damp = self.compute_damping(damping, self._activations.shape[1])
+        act_cov_inverse = inverse_by_cholesky(act_cov, a_damp)
+        sen_cov_inverse = inverse_by_cholesky(sen_cov, s_damp)
+        
+        mat_grads = self.grads_to_mat(grads)
+        nat_grads = sen_cov_inverse @ mat_grads @ act_cov_inverse / self.renorm_coeff
+
+        return self.mat_to_grads(nat_grads)
+        
     @property
     def activation_covariance(self) -> torch.Tensor:
         return self._activations_cov.value
@@ -63,3 +88,7 @@ class Layer(object):
     def set_gradients(self, new_grads):
         for var, grad in zip(self.vars, new_grads):
             var.grad.data = grad
+    
+    @property
+    def renorm_coeff(self) -> float:
+        return 1.

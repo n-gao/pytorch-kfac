@@ -58,12 +58,7 @@ class ConvLayer(Layer):
         self._activations_cov.add_to_average(activation_cov)
         self._sensitivities_cov.add_to_average(sensitivity_cov)
 
-    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
-        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
-        a_damp, s_damp = self.compute_damping(damping, self._activations.shape[1])
-        act_cov_inverse = inverse_by_cholesky(act_cov, a_damp)
-        sen_cov_inverse = inverse_by_cholesky(sen_cov, s_damp)
-
+    def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
         if self.has_bias:
             weights, bias = grads
             # reshape to (out_features, in_features)
@@ -72,15 +67,17 @@ class ConvLayer(Layer):
         else:
             # reshape to (out_features, in_features)
             mat_grads = grads[0].view(grads.shape[0], -1)
+        return mat_grads
 
-        renorm_coeff = self._activations.shape[1]
-        nat_grads = sen_cov_inverse @ mat_grads @ act_cov_inverse / renorm_coeff
-
-        # Split up again
+    def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
         if self.has_bias:
-            return nat_grads[:, :-1].view_as(grads[0]), nat_grads[:, -1]
+            return mat_grads[:, :-1].view_as(self.module.weight), mat_grads[:, -1]
         else:
-            return nat_grads.view_as(grads[0]),
+            return mat_grads.view_as(self.module.weight),
+
+    @property
+    def renorm_coeff(self) -> float:
+        return self._activations.shape[1]
 
     @property
     def has_bias(self) -> bool:
