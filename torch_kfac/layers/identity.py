@@ -11,6 +11,7 @@ class IdentityLayer(Layer):
             in_features=0,
             out_features=0,
             dtype=torch.get_default_dtype(),
+            device='cpu',
             **kwargs)
 
     def update_cov(self):

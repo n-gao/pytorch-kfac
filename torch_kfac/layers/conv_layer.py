@@ -15,7 +15,13 @@ class ConvLayer(Layer):
         in_features = np.prod(module.kernel_size) * module.in_channels + self.has_bias
         out_features = module.out_channels
         self.n_dim = len(module.kernel_size)
-        super().__init__(in_features, out_features, dtype=module.weight.dtype, **kwargs)
+        super().__init__(
+            in_features,
+            out_features, 
+            dtype=module.weight.dtype, 
+            device=module.weight.device,
+            **kwargs
+        )
 
         self._activations = None
         self._sensitivities = None
@@ -32,7 +38,7 @@ class ConvLayer(Layer):
                 self._sensitivities.shape[0],
                 -1,
                 self._sensitivities.shape[-1]
-            )
+            ) * self._sensitivities.shape[0] # rescale by batch size
             
         self.forward_hook_handle = self.module.register_forward_hook(forward_hook)
         self.backward_hook_handle = self.module.register_backward_hook(backward_hook)
@@ -43,6 +49,8 @@ class ConvLayer(Layer):
         self._center = center
 
     def update_cov(self) -> None:
+        if self._activations is None or self._sensitivities is None:
+            return
         act, sen = self._activations, self._sensitivities
         act = act.reshape(-1, act.shape[-1])
         sen = sen.reshape(-1, sen.shape[-1])
@@ -110,7 +118,7 @@ class ConvLayer(Layer):
         # Return the shape (batch_size, n_spatial_locations, n_in_features)
         x = x.view(
             x.shape[0],
-            sum(x.shape[1+i] for i in range(self.n_dim)),
+            np.prod([x.shape[1+i] for i in range(self.n_dim)]),
             -1
         )
         return x

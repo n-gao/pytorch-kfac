@@ -140,3 +140,4 @@ cython_debug/
 
 .ipynb_checkpoints/
 .vscode/
+data/

@@ -6,13 +6,14 @@ from ..utils import MovingAverageVariable
 
 
 class Layer(object):
-    def __init__(self, in_features: int, out_features: int, dtype: torch.dtype, **kwargs):
+    def __init__(self, in_features: int, out_features: int, dtype: torch.dtype, device: torch.device, **kwargs):
         self._in_features = in_features
         self._out_features = out_features
         self._dtype = dtype
+        self._device = device
 
-        self._activations_cov = MovingAverageVariable((in_features, in_features), dtype=dtype)
-        self._sensitivities_cov = MovingAverageVariable((out_features, out_features), dtype=dtype)
+        self._activations_cov = MovingAverageVariable((in_features, in_features), dtype=dtype, device=device)
+        self._sensitivities_cov = MovingAverageVariable((out_features, out_features), dtype=dtype, device=device)
 
     def setup(self, **kwargs) -> None:
         return
@@ -50,8 +51,8 @@ class Layer(object):
     def multiply(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
         act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
         a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
-        act_cov += torch.eye(act_cov.shape[0]) * a_damp
-        sen_cov += torch.eye(sen_cov.shape[0]) * s_damp
+        act_cov += torch.eye(act_cov.shape[0], device=a_damp.device) * a_damp
+        sen_cov += torch.eye(sen_cov.shape[0], device=a_damp.device) * s_damp
 
         mat_grads = self.grads_to_mat(grads)
         nat_grads = sen_cov @ mat_grads @ act_cov / self.renorm_coeff

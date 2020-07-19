@@ -16,6 +16,7 @@ class LinearLayer(Layer):
             in_features=module.in_features + self.has_bias,
             out_features=module.out_features,
             dtype=module.weight.dtype,
+            device=module.weight.device,
             **kwargs)
 
         self._activations = None
@@ -25,7 +26,7 @@ class LinearLayer(Layer):
             self._activations = inp[0].clone().detach().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
 
         def backward_hook(module: nn.Module, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
-            self._sensitivities = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False)
+            self._sensitivities = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
         
         self.forward_hook_handle = self.module.register_forward_hook(forward_hook)
         self.backward_hook_handle = self.module.register_backward_hook(backward_hook)
@@ -34,6 +35,8 @@ class LinearLayer(Layer):
         self._center = center
 
     def update_cov(self) -> None:
+        if self._activations is None or self._sensitivities is None:
+            return
         act, sen = self._activations, self._sensitivities
         if self._center:
             act = center(act)
