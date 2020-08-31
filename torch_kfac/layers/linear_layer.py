@@ -1,11 +1,10 @@
 from typing import Iterable
-from torch_kfac.utils.utils import compute_pi_adjusted_damping
 import torch
 import torch.nn as nn
 from torch.nn import Linear
 
 from .layer import Layer
-from ..utils import center, compute_cov, append_homog, inverse_by_cholesky
+from ..utils import center, compute_cov, append_homog
 
 
 class LinearLayer(Layer):
@@ -23,16 +22,19 @@ class LinearLayer(Layer):
         self._sensitivities = None
 
         def forward_hook(module: nn.Module, inp: torch.Tensor, out: torch.Tensor) -> None:
-            self._activations = inp[0].clone().detach().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
+            if self._forward_lock:
+                self._activations = inp[0].clone().detach().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
 
         def backward_hook(module: nn.Module, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
-            self._sensitivities = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
+            if self._backward_lock:
+                self._sensitivities = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
         
         self.forward_hook_handle = self.module.register_forward_hook(forward_hook)
         self.backward_hook_handle = self.module.register_backward_hook(backward_hook)
 
     def setup(self, center: bool = False, **kwargs):
         self._center = center
+        super().setup(**kwargs)
 
     def update_cov(self) -> None:
         if self._activations is None or self._sensitivities is None:

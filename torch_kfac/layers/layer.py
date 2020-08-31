@@ -15,8 +15,12 @@ class Layer(object):
         self._activations_cov = MovingAverageVariable((in_features, in_features), dtype=dtype, device=device)
         self._sensitivities_cov = MovingAverageVariable((out_features, out_features), dtype=dtype, device=device)
 
-    def setup(self, **kwargs) -> None:
-        return
+        self._forward_lock = None
+        self._backward_lock = None
+
+    def setup(self, forward_lock, backward_lock, **kwargs) -> None:
+        self._forward_lock = forward_lock
+        self._backward_lock = backward_lock
 
     def update_cov(self) -> None:
         raise NotImplementedError()

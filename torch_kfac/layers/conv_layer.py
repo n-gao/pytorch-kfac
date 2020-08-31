@@ -1,4 +1,3 @@
-from torch import inverse, renorm
 from torch_kfac.utils.utils import append_homog, center, compute_cov, inverse_by_cholesky
 from typing import Iterable, Union
 import numpy as np
@@ -47,6 +46,7 @@ class ConvLayer(Layer):
 
     def setup(self, center: bool = False, **kwargs) -> None:
         self._center = center
+        super().setup(**kwargs)
 
     def update_cov(self) -> None:
         if self._activations is None or self._sensitivities is None:

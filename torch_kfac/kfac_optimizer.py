@@ -5,6 +5,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 
 from .layers import init_layer
+from .utils import Lock
 
 
 class KFAC(object):
@@ -59,8 +60,10 @@ class KFAC(object):
         self._momentum = momentum
         self._momentum_type = momentum_type
 
+        self.track_forward = Lock()
+        self.track_backward = Lock()
         for module in model.modules():
-            self.layers.append(init_layer(module, center=center))
+            self.layers.append(init_layer(module, center=center, forward_lock=self.track_forward, backward_lock=self.track_backward))
 
         self._velocities: Dict[Layer, Iterable[torch.Tensor]] = {}
 
@@ -260,7 +263,7 @@ class KFAC(object):
 
     @property
     def use_weight_decay(self) -> bool:
-        return self._weight_decay is not None and self._weight_decay == 0.
+        return self._weight_decay is not None and self._weight_decay != 0.
 
     @property
     def use_norm_constraint(self) -> bool:
