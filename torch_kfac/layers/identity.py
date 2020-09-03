@@ -1,10 +1,10 @@
 from typing import Iterable
 import torch
 
-from .layer import Layer
+from .fisher_block import FisherBlock
 
 
-class IdentityLayer(Layer):
+class Identity(FisherBlock):
     def __init__(self, module: torch.nn.Module, **kwargs) -> None:
         self.module = module
         super().__init__(

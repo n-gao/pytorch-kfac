@@ -1,11 +1,11 @@
-from torch_kfac.utils.utils import compute_pi_adjusted_damping, inverse_by_cholesky, kronecker_product, normalize_damping
 from typing import Iterable, Tuple
 import torch
 
-from ..utils import MovingAverageVariable
+from ..utils import MovingAverageVariable, Lock, compute_pi_adjusted_damping, \
+    inverse_by_cholesky, kronecker_product, normalize_damping
 
 
-class Layer(object):
+class FisherBlock(object):
     def __init__(self, in_features: int, out_features: int, dtype: torch.dtype, device: torch.device, **kwargs):
         self._in_features = in_features
         self._out_features = out_features
@@ -15,10 +15,10 @@ class Layer(object):
         self._activations_cov = MovingAverageVariable((in_features, in_features), dtype=dtype, device=device)
         self._sensitivities_cov = MovingAverageVariable((out_features, out_features), dtype=dtype, device=device)
 
-        self._forward_lock = None
-        self._backward_lock = None
+        self._forward_lock = False
+        self._backward_lock = False
 
-    def setup(self, forward_lock, backward_lock, **kwargs) -> None:
+    def setup(self, forward_lock: Lock, backward_lock: Lock, **kwargs) -> None:
         self._forward_lock = forward_lock
         self._backward_lock = backward_lock
 
@@ -97,3 +97,28 @@ class Layer(object):
     @property
     def renorm_coeff(self) -> float:
         return 1.
+
+
+class ExtensionFisherBlock(FisherBlock):
+    def __init__(self, module: torch.nn.Module, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.module = module
+        self.forward_hook_handle = None
+        self.backward_hook_handle = None
+
+        self.forward_hook_handle = self.module.register_forward_hook(self._forward_hook_wrapper)
+        self.backward_hook_handle = self.module.register_backward_hook(self._backward_hook_wrapper)
+
+    def _forward_hook_wrapper(self, *args):
+        if self._forward_lock:
+            return self.forward_hook(*args)
+
+    def _backward_hook_wrapper(self, *args):
+        if self._backward_lock:
+            return self.backward_hook(*args)
+
+    def forward_hook(self, module: torch.nn.Module, *args):
+        raise NotImplementedError()
+
+    def backward_hook(self, module: torch.nn.Module, *args):
+        raise NotImplementedError()

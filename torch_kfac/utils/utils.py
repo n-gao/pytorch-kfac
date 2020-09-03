@@ -1,7 +1,5 @@
 from typing import Iterable, Tuple
 import torch
-from torch.functional import norm
-from torch.serialization import normalize_storage_type
 
 __all__ = [
     'center',
@@ -12,7 +10,9 @@ __all__ = [
     'kronecker_product',
     'normalize_damping',
     'compute_pi_tracenorm',
-    'compute_pi_adjusted_damping'
+    'compute_pi_adjusted_damping',
+    'inner_product_pairs',
+    'scalar_product_pairs'
 ]
 
 def center(x: torch.Tensor) -> torch.Tensor:

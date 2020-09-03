@@ -1,48 +1,51 @@
-from torch_kfac.utils.utils import append_homog, center, compute_cov, inverse_by_cholesky
 from typing import Iterable, Union
 import numpy as np
 import torch
-import torch.nn as nn
+from torch.nn import Conv1d, Conv2d, Conv3d
 import torch.nn.functional as F
 
-from .layer import Layer
+from .fisher_block import ExtensionFisherBlock
+from ..utils import append_homog, center, compute_cov
 
 
-class ConvLayer(Layer):
-    def __init__(self, module: Union[nn.Conv1d, nn.Conv2d, nn.Conv3d], **kwargs) -> None:
-        self.module = module
-        in_features = np.prod(module.kernel_size) * module.in_channels + self.has_bias
+class ConvFisherBlock(ExtensionFisherBlock):
+    def __init__(
+        self, 
+        module: Union[Conv1d, Conv2d, Conv3d],
+        **kwargs
+    ) -> None:
+        in_features = np.prod(module.kernel_size) * module.in_channels + int(module.bias is not None)
         out_features = module.out_channels
-        self.n_dim = len(module.kernel_size)
         super().__init__(
-            in_features,
-            out_features, 
+            module=module,
+            in_features=in_features,
+            out_features=out_features, 
             dtype=module.weight.dtype, 
             device=module.weight.device,
             **kwargs
         )
+        self.n_dim = len(module.kernel_size)
 
         self._activations = None
         self._sensitivities = None
 
-        @torch.no_grad()
-        def forward_hook(module: nn.Module, inp: torch.Tensor, out: torch.Tensor) -> None:
-            self._activations = self.extract_patches(inp[0])
-
-        @torch.no_grad()
-        def backward_hook(module: nn.Module, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
-            self._sensitivities = grad_out[0].transpose(1, -1).contiguous()
-            # Reshape to (batch_size, n_spatial_locations, n_out_features)
-            self._sensitivities = self._sensitivities.view(
-                self._sensitivities.shape[0],
-                -1,
-                self._sensitivities.shape[-1]
-            ) * self._sensitivities.shape[0] # rescale by batch size
-            
-        self.forward_hook_handle = self.module.register_forward_hook(forward_hook)
-        self.backward_hook_handle = self.module.register_backward_hook(backward_hook)
-
         self._center = False
+
+    @torch.no_grad()
+    def forward_hook(self, module: Union[Conv1d, Conv2d, Conv3d], inp: torch.Tensor, out: torch.Tensor) -> None:
+        self._activations = self.extract_patches(inp[0])
+
+    @torch.no_grad()
+    def backward_hook(self, module: Union[Conv1d, Conv2d, Conv3d], grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
+        self._sensitivities = grad_out[0].transpose(1, -1).contiguous()
+        # Reshape to (batch_size, n_spatial_locations, n_out_features)
+        self._sensitivities = self._sensitivities.view(
+            self._sensitivities.shape[0],
+            -1,
+            self._sensitivities.shape[-1]
+        ) #* self._sensitivities.shape[0]
+        # in the original code they scale by the batch_size, I don't quite understand this
+        # sometimes it boosts the performance sometimes it hurts
 
     def setup(self, center: bool = False, **kwargs) -> None:
         self._center = center

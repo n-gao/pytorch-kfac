@@ -1,18 +1,18 @@
 import torch.nn as nn
-from .layer import Layer
-from .linear_layer import LinearLayer
-from .conv_layer import ConvLayer
-from .identity import IdentityLayer
+from .fisher_block import FisherBlock
+from .linear_block import FullyConnectedFisherBlock
+from .conv_block import ConvFisherBlock
+from .identity import Identity
 
 
-def init_layer(module: nn.Module, **kwargs) -> Layer:
+def init_fisher_block(module: nn.Module, **kwargs) -> FisherBlock:
     if type(module) is nn.Linear:
-        layer = LinearLayer(module)
+        layer = FullyConnectedFisherBlock(module)
     elif type(module) in [nn.Conv1d, nn.Conv2d, nn.Conv3d]:
-        layer = ConvLayer(module)
-    elif type(module) is Layer:
+        layer = ConvFisherBlock(module)
+    elif type(module) is FisherBlock:
         layer = module
     else:
-        layer = IdentityLayer(module)
+        layer = Identity(module)
     layer.setup(**kwargs)
     return layer

@@ -1,11 +1,9 @@
 import numpy as np
-from torch_kfac.utils.utils import inner_product_pairs, scalar_product_pairs
-from torch_kfac.layers.layer import Layer
 from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 
-from .layers import init_layer
-from .utils import Lock
+from .layers import init_fisher_block, FisherBlock
+from .utils import Lock, inner_product_pairs, scalar_product_pairs
 
 
 class KFAC(object):
@@ -35,7 +33,7 @@ class KFAC(object):
         assert momentum_type not in ['regular' 'adam'] or norm_constraint is None, 'Norm constraint may only be used with regular momentum.'
 
         self.model = model
-        self.layers: List[Layer] = []
+        self.blocks: List[FisherBlock] = []
         self.learning_rate = learning_rate
 
         self.counter = 0
@@ -63,15 +61,15 @@ class KFAC(object):
         self.track_forward = Lock()
         self.track_backward = Lock()
         for module in model.modules():
-            self.layers.append(init_layer(module, center=center, forward_lock=self.track_forward, backward_lock=self.track_backward))
+            self.blocks.append(init_fisher_block(module, center=center, forward_lock=self.track_forward, backward_lock=self.track_backward))
 
-        self._velocities: Dict[Layer, Iterable[torch.Tensor]] = {}
+        self._velocities: Dict[FisherBlock, Iterable[torch.Tensor]] = {}
 
     def reset_cov(self) -> None:
-        for layer in self.layers:
-            layer.reset_cov()
+        for block in self.blocks:
+            block.reset_cov()
 
-    def _add_weight_decay(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> Iterable[Tuple[Iterable[torch.Tensor], Layer]]:
+    def _add_weight_decay(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         """Applies weight decay.
         """
         return tuple(
@@ -79,7 +77,7 @@ class KFAC(object):
             for grads, layer in grads_and_layers
         )
 
-    def _squared_fisher_norm(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> float:
+    def _squared_fisher_norm(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> float:
         """Computes the squared (approximate) Fisher norm of the updates.
 
         This is defined as v^T F v, where F is the approximate Fisher matrix
@@ -88,7 +86,7 @@ class KFAC(object):
         """
         return inner_product_pairs(grads_and_layers, precon_grads_and_layers)
         
-    def _update_clip_coeff(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> float:
+    def _update_clip_coeff(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> float:
         """Computes the scale factor for the update to satisfy the norm constraint.
 
         Defined as min(1, sqrt(c / r^T F r)), where c is the norm constraint,
@@ -110,7 +108,7 @@ class KFAC(object):
             torch.sqrt(self._norm_constraint / sq_norm_up)
         )
 
-    def _clip_updates(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> Iterable[Tuple[Iterable[torch.Tensor], Layer]]:
+    def _clip_updates(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         """Rescales the preconditioned gradients to satisfy the norm constraint.
 
         Rescales the preconditioned gradients such that the resulting update r
@@ -124,13 +122,13 @@ class KFAC(object):
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
     def _update_cov(self) -> None:
-        for layer in self.layers:
+        for layer in self.blocks:
             layer.update_cov()
 
-    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> Iterable[Tuple[Iterable[torch.Tensor], Layer]]:
+    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
 
-    def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], Layer]]:
+    def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         def _update_velocity(grads, layer):
             if layer not in self._velocities:
                 self._velocities[layer] = tuple(torch.zeros_like(grad) for grad in grads)
@@ -143,16 +141,16 @@ class KFAC(object):
 
         return tuple((_update_velocity(grads, layer), layer) for grads, layer in grads_and_layers)
 
-    def _compute_approx_qmodel_change(self, updates_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]], grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], Layer]]) -> torch.Tensor:
+    def _compute_approx_qmodel_change(self, updates_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> torch.Tensor:
         quad_term = 0.5 * inner_product_pairs(updates_and_layers, tuple((layer.multiply(grads, self.damping), layer) for grads, layer in grads_and_layers))
         linear_term = inner_product_pairs(updates_and_layers, grads_and_layers)
         if not self._include_damping_in_qmodel_change:
             quad_term -= 0.5 * self._sub_damping_out_qmodel_change_coeff * self.damping * linear_term
         return quad_term + linear_term
         
-    def _get_raw_updates(self) -> Iterable[Tuple[Iterable[torch.Tensor], Layer]]:
+    def _get_raw_updates(self) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         # Get grads
-        grads_and_layers = tuple((layer.grads, layer) for layer in self.layers if any(grad is not None for grad in layer.grads))
+        grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(grad is not None for grad in layer.grads))
 
         if self._momentum_type == 'regular':
             # Multiple preconditioner
