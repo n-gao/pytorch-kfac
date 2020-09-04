@@ -25,6 +25,7 @@ class KFAC(object):
         weight_decay: Optional[float] = None,
         l2_reg: float = 0.,
 
+        update_cov_manually: bool = False,
         center: bool = False) -> None:
 
         legal_momentum_types = ['regular', 'adam']
@@ -64,6 +65,7 @@ class KFAC(object):
             self.blocks.append(init_fisher_block(module, center=center, forward_lock=self.track_forward, backward_lock=self.track_backward))
 
         self._velocities: Dict[FisherBlock, Iterable[torch.Tensor]] = {}
+        self.update_cov_manually = update_cov_manually
 
     def reset_cov(self) -> None:
         for block in self.blocks:
@@ -120,10 +122,6 @@ class KFAC(object):
         """
         coeff = self._update_clip_coeff(grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
-
-    def _update_cov(self) -> None:
-        for layer in self.blocks:
-            layer.update_cov()
 
     def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
@@ -231,7 +229,10 @@ class KFAC(object):
         self._update_damping(loss)
 
         # Update covariance matrices
-        self._update_cov()
+        # We allow for manual updates in case we need more control over the optimization
+        # routine, e.g., when distributin KFAC
+        if not self.update_cov_manually:
+            self.update_cov()
 
         raw_updates_and_layers = self._get_raw_updates()
 
@@ -254,6 +255,26 @@ class KFAC(object):
             self._prev_loss = loss.clone()
 
         self.counter += 1
+
+    def update_cov(self) -> None:
+        for layer in self.blocks:
+            layer.update_cov()
+
+    @property
+    def covariances(self) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        return [
+            (
+                block._activations_cov._var.cpu(),
+                block._sensitivities_cov._var.cpu()
+            )
+            for block in self.blocks
+        ]
+
+    @covariances.setter
+    def covariances(self, new_covariances: List[Tuple[torch.Tensor, torch.Tensor]]) -> None:
+        for block, (a_cov, s_cov) in zip(self.blocks, new_covariances):
+            block._activations_cov.value = a_cov.to(block._activations_cov.value)
+            block._sensitivities_cov.value = s_cov.to(block._sensitivities_cov.value)
 
     @property
     def damping(self) -> torch.Tensor:

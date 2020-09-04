@@ -30,3 +30,9 @@ class MovingAverageVariable(object):
         self._var = torch.zeros_like(self._var)
         self._total_weight = torch.zeros_like(self._total_weight)
     
+    @value.setter
+    def value(self, new_value) -> None:
+        if self._normalize_value:
+            self._var.data = new_value * self._normalize_value
+        else:
+            self._var.data = new_value
