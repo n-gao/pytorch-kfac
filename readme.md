@@ -16,6 +16,23 @@ python setup.py install
 ### Example
 An example notebook is provided in `examples`.
 
+One has to enable the tracking of the forward pass and backward pass.
+This prevents the optimizer to track other passes, e.g., for validation.
+```python
+kfac = torch_kfac.KFAC(model, learning_rate=1e-3, damping=1e-3)
+...
+model.zero_grad()
+with kfac.track_forward():
+  # forward pass
+  loss = ...
+with kfac.track_backward():
+  # backward pass
+  loss.backward()
+kfac.step()
+
+# Do some validation
+```
+
 ## Features
 This implementation features the following features:
 * Regular and Adam momentum
@@ -43,9 +60,9 @@ This implies that `torch.optim.lr_scheduler` are not available for KFAC. However
 
 * Documentation
 
-* Only track forward and backward pass when needed. This could be done with context managers like: `with kfac.track_forward():` and `with kfac.track_backward():`.
+* Add support for distributed training (This is partially possible by synchronizing the covariance matrices and gradients manually.)
 
-* Add support for distributed training
+* `optimizer.zero_gard` is not available yet, you can use `model.zero_grad`
 
 ## References
 ### Orignal Repsotiry
