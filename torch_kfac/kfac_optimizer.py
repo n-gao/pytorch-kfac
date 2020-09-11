@@ -268,11 +268,12 @@ class KFAC(object):
                 block._sensitivities_cov._var.cpu()
             )
             for block in self.blocks
+            if not block.is_static
         ]
 
     @covariances.setter
     def covariances(self, new_covariances: List[Tuple[torch.Tensor, torch.Tensor]]) -> None:
-        for block, (a_cov, s_cov) in zip(self.blocks, new_covariances):
+        for block, (a_cov, s_cov) in zip(filter(lambda a: not a.is_static, self.blocks), new_covariances):
             block._activations_cov.value = a_cov.to(block._activations_cov.value)
             block._sensitivities_cov.value = s_cov.to(block._sensitivities_cov.value)
 

@@ -73,6 +73,10 @@ class FisherBlock(object):
         nat_grads = sen_cov_inverse @ mat_grads @ act_cov_inverse / self.renorm_coeff
 
         return self.mat_to_grads(nat_grads)
+
+    @property
+    def is_static(self) -> bool:
+        return (self._in_features == 0) or (self._out_features == 0)
         
     @property
     def activation_covariance(self) -> torch.Tensor:
