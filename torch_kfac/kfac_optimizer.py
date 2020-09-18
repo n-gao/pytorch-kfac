@@ -274,8 +274,8 @@ class KFAC(object):
     @covariances.setter
     def covariances(self, new_covariances: List[Tuple[torch.Tensor, torch.Tensor]]) -> None:
         for block, (a_cov, s_cov) in zip(filter(lambda a: not a.is_static, self.blocks), new_covariances):
-            block._activations_cov.value = a_cov.to(block._activations_cov._var)
-            block._sensitivities_cov.value = s_cov.to(block._sensitivities_cov._var)
+            block._activations_cov.value = a_cov.to(block._activations_cov._var, non_blocking=True)
+            block._sensitivities_cov.value = s_cov.to(block._sensitivities_cov._var, non_blocking=True)
 
     @property
     def damping(self) -> torch.Tensor:
