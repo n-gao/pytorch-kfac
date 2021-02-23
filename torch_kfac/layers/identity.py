@@ -14,7 +14,7 @@ class Identity(FisherBlock):
             device='cpu',
             **kwargs)
 
-    def update_cov(self):
+    def update_cov(self, cov_ema_decay: float = 1.0):
         return
 
     def multiply(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:

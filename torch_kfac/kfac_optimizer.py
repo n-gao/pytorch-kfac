@@ -7,31 +7,64 @@ from .utils import Lock, inner_product_pairs, scalar_product_pairs
 
 
 class KFAC(object):
-    def __init__(self, 
-        model: torch.nn.Module, 
-        learning_rate: float, 
+    def __init__(self,
+                 model: torch.nn.Module,
+                 learning_rate: float,
 
-        damping: torch.Tensor,
-        adapt_damping: bool = False,
-        damping_adaptation_decay: float = 0.99,
-        damping_adaptation_interval: int = 5,
-        include_damping_in_qmodel_change: bool = False,
-        min_damping = 1e-8,
+                 damping: torch.Tensor,
+                 adapt_damping: bool = False,
+                 damping_adaptation_decay: float = 0.99,
+                 damping_adaptation_interval: int = 5,
+                 include_damping_in_qmodel_change: bool = False,
+                 min_damping=1e-8,
 
-        momentum: float = 0.9,
-        momentum_type: str = 'regular',
+                 cov_ema_decay: float = 0.95,
 
-        norm_constraint: Optional[float] = None,
-        weight_decay: Optional[float] = None,
-        l2_reg: float = 0.,
+                 momentum: float = 0.9,
+                 momentum_type: str = 'regular',
 
-        update_cov_manually: bool = False,
-        center: bool = False) -> None:
+                 norm_constraint: Optional[float] = None,
+                 weight_decay: Optional[float] = None,
+                 l2_reg: float = 0.,
+
+                 update_cov_manually: bool = False,
+                 center: bool = False) -> None:
+        """Creates the KFAC Optimizer object.
+
+        Args:
+            model (torch.nn.Module): A `torch.nn.Module` to optimize.
+            learning_rate (float): The initial learning rate
+            damping (torch.Tensor): This quantity times the identiy matrix is (approximately) added
+                to the matrix being estimated. - This relates to the "trust" in the second order approximation.
+            adapt_damping (bool, optional): If True we adapt the damping according to the Levenberg-Marquardt
+                rule described in Section 6.5 of the original K-FAC paper. The details of this scheme are controlled by
+                various additional arguments below. Defaults to False.
+            damping_adaptation_decay (float, optional): The `damping` parameter is multiplied by the `damping_adaption_decay`
+                every `damping_adaption_interval` number of iterations. Defaults to 0.99.
+            damping_adaptation_interval (int, optional): Number of steps in between updating the `damping` parameter. Defaults to 5.
+            include_damping_in_qmodel_change (bool, optional): If True the damping contribution is included in the quadratic model
+                for the purposes of computing qmodel_change in rho. Defaults to False.
+            min_damping ([type], optional): Minimum value the damping parameter can take. The default is quite arbitrary. Defaults to 1e-8.
+            cov_ema_decay (float): The decay factor used when calculating the covariance estimate moving averages. Defaults to 0.95.
+            momentum (float, optional): The momentum decay constant to use.. Defaults to 0.9.
+            momentum_type (str, optional): The type of momentum to use. Options: [`regular`, `adam`]. Defaults to 'regular'.
+            norm_constraint (Optional[float], optional): If specified, the update is scaled down so that its approximate squared
+                Fisher norm v^T F v is at most the specified value. May only be used with `regular` momentum. Defaults to None.
+            weight_decay (Optional[float], optional): The coefficient to use for weight decay. If set to `None` there is no
+                weight decay. Defaults to None.
+            l2_reg (float, optional): L2 normalization. Defaults to 0..
+            update_cov_manually (bool, optional): If set to `True`, the covariance matrices are not updated automatically at every
+                `.step()` call. You will have to call it manually using `.update_cov()`. This is useful in distributed settings
+                or when you want your covariances w.r.t. the model distribution rather than the loss function. Defaults to False.
+            center (bool, optional): If set to True the activations and sensitivities are centered. This is useful when dealing with
+                unnormalized distributions. Defaults to False.
+        """
 
         legal_momentum_types = ['regular', 'adam']
         momentum_type = momentum_type.lower()
         assert momentum_type in legal_momentum_types, f'{momentum_type} type momentum is not supported.'
-        assert momentum_type not in ['regular' 'adam'] or norm_constraint is None, 'Norm constraint may only be used with regular momentum.'
+        assert momentum_type not in [
+            'regular' 'adam'] or norm_constraint is None, 'Norm constraint may only be used with regular momentum.'
 
         self.model = model
         self.blocks: List[FisherBlock] = []
@@ -56,13 +89,22 @@ class KFAC(object):
         self._l2_reg = l2_reg
         self._norm_constraint = norm_constraint
 
+        self._cov_ema_decay = cov_ema_decay
+
         self._momentum = momentum
         self._momentum_type = momentum_type
 
         self.track_forward = Lock()
         self.track_backward = Lock()
         for module in model.modules():
-            self.blocks.append(init_fisher_block(module, center=center, forward_lock=self.track_forward, backward_lock=self.track_backward))
+            self.blocks.append(
+                init_fisher_block(
+                    module,
+                    center=center,
+                    forward_lock=self.track_forward,
+                    backward_lock=self.track_backward
+                )
+            )
 
         self._velocities: Dict[FisherBlock, Iterable[torch.Tensor]] = {}
         self.update_cov_manually = update_cov_manually
@@ -75,7 +117,8 @@ class KFAC(object):
         """Applies weight decay.
         """
         return tuple(
-            (tuple(grad + self._weight_decay*var for grad, var in zip(grads, layer.vars)), layer)
+            (tuple(grad + self._weight_decay*var for grad,
+                   var in zip(grads, layer.vars)), layer)
             for grads, layer in grads_and_layers
         )
 
@@ -87,7 +130,7 @@ class KFAC(object):
         This is computed efficiently as v^T g.
         """
         return inner_product_pairs(grads_and_layers, precon_grads_and_layers)
-        
+
     def _update_clip_coeff(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], precon_grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> float:
         """Computes the scale factor for the update to satisfy the norm constraint.
 
@@ -103,7 +146,8 @@ class KFAC(object):
         before multiplying by alpha. Hence, our formula differs from theirs by a
         factor of alpha.
         """
-        sq_norm_grad = self._squared_fisher_norm(grads_and_layers, precon_grads_and_layers)
+        sq_norm_grad = self._squared_fisher_norm(
+            grads_and_layers, precon_grads_and_layers)
         sq_norm_up = sq_norm_grad * self.learning_rate**2
         return torch.min(
             torch.ones((), dtype=sq_norm_up.dtype, device=sq_norm_up.device),
@@ -120,7 +164,8 @@ class KFAC(object):
         Ba et al., Distributed Second-Order Optimization using Kronecker-Factored
         Approximations.
         """
-        coeff = self._update_clip_coeff(grads_and_layers, precon_grads_and_layers)
+        coeff = self._update_clip_coeff(
+            grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
     def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
@@ -129,7 +174,8 @@ class KFAC(object):
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         def _update_velocity(grads, layer):
             if layer not in self._velocities:
-                self._velocities[layer] = tuple(torch.zeros_like(grad) for grad in grads)
+                self._velocities[layer] = tuple(
+                    torch.zeros_like(grad) for grad in grads)
             velocities = self._velocities[layer]
 
             for velocity, grad in zip(velocities, grads):
@@ -140,27 +186,33 @@ class KFAC(object):
         return tuple((_update_velocity(grads, layer), layer) for grads, layer in grads_and_layers)
 
     def _compute_approx_qmodel_change(self, updates_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> torch.Tensor:
-        quad_term = 0.5 * inner_product_pairs(updates_and_layers, tuple((layer.multiply(grads, self.damping), layer) for grads, layer in grads_and_layers))
+        quad_term = 0.5 * inner_product_pairs(updates_and_layers, tuple(
+            (layer.multiply(grads, self.damping), layer) for grads, layer in grads_and_layers))
         linear_term = inner_product_pairs(updates_and_layers, grads_and_layers)
         if not self._include_damping_in_qmodel_change:
-            quad_term -= 0.5 * self._sub_damping_out_qmodel_change_coeff * self.damping * linear_term
+            quad_term -= 0.5 * self._sub_damping_out_qmodel_change_coeff * \
+                self.damping * linear_term
         return quad_term + linear_term
-        
+
     def _get_raw_updates(self) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         # Get grads
-        grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(grad is not None for grad in layer.grads))
+        grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(
+            grad is not None for grad in layer.grads))
 
         if self._momentum_type == 'regular':
             # Multiple preconditioner
-            raw_updates_and_layers = self._multiply_preconditioner(grads_and_layers)
-            
+            raw_updates_and_layers = self._multiply_preconditioner(
+                grads_and_layers)
+
             # Apply "KL clipping"
             if self.use_norm_constraint:
-                raw_updates_and_layers = self._clip_updates(grads_and_layers, raw_updates_and_layers)
+                raw_updates_and_layers = self._clip_updates(
+                    grads_and_layers, raw_updates_and_layers)
 
             # Update velocities
             if self.use_momentum:
-                raw_updates_and_layers = self._update_velocities(raw_updates_and_layers, self._momentum)
+                raw_updates_and_layers = self._update_velocities(
+                    raw_updates_and_layers, self._momentum)
 
             # Do adaptive damping
             if self._adapt_damping and self.is_damping_adaption_time:
@@ -168,31 +220,38 @@ class KFAC(object):
                     -self.learning_rate,
                     raw_updates_and_layers
                 )
-                self._qmodel_change = self._compute_approx_qmodel_change(updates_and_layers, grads_and_layers)
+                self._qmodel_change = self._compute_approx_qmodel_change(
+                    updates_and_layers, grads_and_layers)
 
         elif self._momentum_type == 'adam':
             # For adam like momentum we first compute the velocities and use the velocities also for KL clipping instead
             # of computing the velocities at the very end.
             # Update velocities
             if self.use_momentum:
-                velocities_and_layers = self._update_velocities(grads_and_layers, self._momentum)
+                velocities_and_layers = self._update_velocities(
+                    grads_and_layers, self._momentum)
             else:
                 velocities_and_layers = grads_and_layers
 
             # Multiply preconditioner
-            raw_updates_and_layers = self._multiply_preconditioner(grads_and_layers)
+            raw_updates_and_layers = self._multiply_preconditioner(
+                grads_and_layers)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
-                raw_updates_and_layers = self._clip_updates(velocities_and_layers, raw_updates_and_layers)
+                raw_updates_and_layers = self._clip_updates(
+                    velocities_and_layers, raw_updates_and_layers)
 
             # Do adaptive damping
             if self._adapt_damping and self.is_damping_adaption_time:
                 # See https://github.com/tensorflow/kfac/blob/cf6265590944b5b937ff0ceaf4695a72c95a02b9/kfac/python/ops/optimizer.py#L1009
                 self._qmodel_change = 0.5 * self.learning_rate**2 * inner_product_pairs(raw_updates_and_layers, velocities_and_layers)\
-                                        - self.learning_rate * inner_product_pairs(raw_updates_and_layers, grads_and_layers)
+                    - self.learning_rate * \
+                    inner_product_pairs(
+                        raw_updates_and_layers, grads_and_layers)
         else:
-            raise NotImplementedError(f'Momentum {self._momentum_type} is not supported yet.')
+            raise NotImplementedError(
+                f'Momentum {self._momentum_type} is not supported yet.')
         return raw_updates_and_layers
 
     def _update_damping(self, loss):
@@ -202,7 +261,8 @@ class KFAC(object):
         loss_change = loss - self._prev_loss
         rho = loss_change / self._qmodel_change
 
-        should_decrease = (loss_change < 0 and self._qmodel_change > 0) or rho > 0.75
+        should_decrease = (
+            loss_change < 0 and self._qmodel_change > 0) or rho > 0.75
         should_increase = rho < 0.25
 
         if should_decrease:
@@ -211,8 +271,9 @@ class KFAC(object):
             new_damping = self.damping / self._omega
         else:
             new_damping = self.damping
-        
-        new_damping = torch.clamp(new_damping, min=self._min_damping + self._l2_reg)
+
+        new_damping = torch.clamp(
+            new_damping, min=self._min_damping + self._l2_reg)
 
         self._damping = new_damping
         self._rho = rho
@@ -220,7 +281,8 @@ class KFAC(object):
     @torch.no_grad()
     def step(self, loss: Optional[torch.Tensor] = None) -> None:
         if self._adapt_damping and loss is None:
-            raise ValueError('The loss must be passed if adaptive damping is used.')
+            raise ValueError(
+                'The loss must be passed if adaptive damping is used.')
 
         # We update the damping before the optimization step
         # This allows us to avoid multiple passes through the model
@@ -238,8 +300,9 @@ class KFAC(object):
 
         # Apply weight decay
         if self.use_weight_decay:
-            raw_updates_and_layers = self._add_weight_decay(raw_updates_and_layers)
-        
+            raw_updates_and_layers = self._add_weight_decay(
+                raw_updates_and_layers)
+
         # Apply the new gradients
         for precon_grad, layer in raw_updates_and_layers:
             layer.set_gradients(precon_grad)
@@ -258,7 +321,7 @@ class KFAC(object):
 
     def update_cov(self) -> None:
         for layer in self.blocks:
-            layer.update_cov()
+            layer.update_cov(cov_ema_decay=self._cov_ema_decay)
 
     @property
     def covariances(self) -> List[Tuple[torch.Tensor, torch.Tensor]]:
@@ -274,8 +337,10 @@ class KFAC(object):
     @covariances.setter
     def covariances(self, new_covariances: List[Tuple[torch.Tensor, torch.Tensor]]) -> None:
         for block, (a_cov, s_cov) in zip(filter(lambda a: not a.is_static, self.blocks), new_covariances):
-            block._activations_cov.value = a_cov.to(block._activations_cov._var, non_blocking=True)
-            block._sensitivities_cov.value = s_cov.to(block._sensitivities_cov._var, non_blocking=True)
+            block._activations_cov.value = a_cov.to(
+                block._activations_cov._var, non_blocking=True)
+            block._sensitivities_cov.value = s_cov.to(
+                block._sensitivities_cov._var, non_blocking=True)
 
     @property
     def damping(self) -> torch.Tensor:

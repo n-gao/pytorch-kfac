@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 import torch
 
 from ..utils import MovingAverageVariable, Lock, compute_pi_adjusted_damping, \
@@ -22,7 +22,7 @@ class FisherBlock(object):
         self._forward_lock = forward_lock
         self._backward_lock = backward_lock
 
-    def update_cov(self) -> None:
+    def update_cov(self, cov_ema_decay: float = 1.0) -> None:
         raise NotImplementedError()
 
     def compute_damping(self, damping: torch.Tensor, normalization: float = None) -> Tuple[torch.Tensor, torch.Tensor]:
