@@ -65,7 +65,7 @@ class FisherBlock(object):
         
     def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
         act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
-        a_damp, s_damp = self.compute_damping(damping, self._activations.shape[1])
+        a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
         act_cov_inverse = inverse_by_cholesky(act_cov, a_damp)
         sen_cov_inverse = inverse_by_cholesky(sen_cov, s_damp)
         
