@@ -22,11 +22,19 @@ class FullyConnectedFisherBlock(ExtensionFisherBlock):
 
     @torch.no_grad()
     def forward_hook(self, module: Linear, inp: torch.Tensor, out: torch.Tensor) -> None:
-        self._activations = inp[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
+        x = inp[0].detach().clone().reshape(-1, self._in_features - self.has_bias).requires_grad_(False)
+        if self._activations is None:
+            self._activations = x
+        else:
+            self._activations = torch.cat([self._activations, x])
 
     @torch.no_grad()
     def backward_hook(self, module: Linear, grad_inp: torch.Tensor, grad_out: torch.Tensor) -> None:
-        self._sensitivities = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
+        x = grad_out[0].clone().detach().reshape(-1, self._out_features).requires_grad_(False) * grad_out[0].shape[0]
+        if self._sensitivities is None:
+            self._sensitivities = x
+        else:
+            self._sensitivities = torch.cat([self._sensitivities, x])
 
     def setup(self, center: bool = False, **kwargs):
         super().setup(**kwargs)
