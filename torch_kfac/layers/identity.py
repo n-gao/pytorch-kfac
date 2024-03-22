@@ -21,7 +21,7 @@ class Identity(FisherBlock):
         return grads
 
     def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor,
-                                update_covariances: bool) -> Iterable[torch.Tensor]:
+                                update_inverses: bool) -> Iterable[torch.Tensor]:
         return grads
         
     @property

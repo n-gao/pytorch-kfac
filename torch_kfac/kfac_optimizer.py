@@ -169,8 +169,8 @@ class KFAC(object):
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
     def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]],
-                                 update_covariances: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
-        return tuple((layer.multiply_preconditioner(grads, self.damping, update_covariances), layer) for (grads, layer) in grads_and_layers)
+                                 update_inverses: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+        return tuple((layer.multiply_preconditioner(grads, self.damping, update_inverses), layer) for (grads, layer) in grads_and_layers)
 
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         def _update_velocity(grads, layer):
@@ -195,7 +195,7 @@ class KFAC(object):
                 self.damping * linear_term
         return quad_term + linear_term
 
-    def _get_raw_updates(self, update_covariances: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+    def _get_raw_updates(self, update_inverses: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         # Get grads
         grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(
             grad is not None for grad in layer.grads))
@@ -203,7 +203,7 @@ class KFAC(object):
         if self._momentum_type == 'regular':
             # Multiple preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers, update_covariances)
+                grads_and_layers, update_inverses)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
@@ -236,7 +236,7 @@ class KFAC(object):
 
             # Multiply preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers, update_covariances)
+                grads_and_layers, update_inverses)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
