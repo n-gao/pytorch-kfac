@@ -17,25 +17,40 @@ class FisherBlock(object):
 
         self._forward_lock = False
         self._backward_lock = False
+        self._enable_pi_correction = True
 
-    def setup(self, forward_lock: Lock, backward_lock: Lock, **kwargs) -> None:
+    def setup(self, forward_lock: Lock, backward_lock: Lock, enable_pi_correction: bool, **kwargs) -> None:
         self._forward_lock = forward_lock
         self._backward_lock = backward_lock
+        self._enable_pi_correction = enable_pi_correction
 
     def update_cov(self, cov_ema_decay: float = 1.0) -> None:
         raise NotImplementedError()
 
     def compute_damping(self, damping: torch.Tensor, normalization: float = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the adapted damping for the Tikhonov regularization.
+        Args:
+            damping: the damping constant for the Tikhonov
+            normalization: If true, the damping will be normalized using this parameter.
+
+        Returns:
+            A tuple where the first entry is the damping for the activations covariance matrix,
+            the second entry is the damping for the sensitivities covariance matrix.
+        """
         if normalization is not None:
             maybe_normalized_damping = normalize_damping(damping, normalization)
         else:
             maybe_normalized_damping = damping
 
-        return compute_pi_adjusted_damping(
-            self.activation_covariance,
-            self.sensitivity_covariance,
-            maybe_normalized_damping ** 0.5
-        )
+        if self._enable_pi_correction:
+            return compute_pi_adjusted_damping(
+                self.activation_covariance,
+                self.sensitivity_covariance,
+                maybe_normalized_damping ** 0.5
+            )
+        else:
+            return maybe_normalized_damping ** 0.5, maybe_normalized_damping ** 0.5
 
     def full_fisher_block(self):
         left_factor = self.activation_covariance
