@@ -168,8 +168,9 @@ class KFAC(object):
             grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
-    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
-        return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
+    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]],
+                                 update_covariances: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+        return tuple((layer.multiply_preconditioner(grads, self.damping, update_covariances), layer) for (grads, layer) in grads_and_layers)
 
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         def _update_velocity(grads, layer):
@@ -194,7 +195,7 @@ class KFAC(object):
                 self.damping * linear_term
         return quad_term + linear_term
 
-    def _get_raw_updates(self) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+    def _get_raw_updates(self, update_covariances: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         # Get grads
         grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(
             grad is not None for grad in layer.grads))
@@ -202,7 +203,7 @@ class KFAC(object):
         if self._momentum_type == 'regular':
             # Multiple preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers)
+                grads_and_layers, update_covariances)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
@@ -235,7 +236,7 @@ class KFAC(object):
 
             # Multiply preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers)
+                grads_and_layers, update_covariances)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
@@ -279,7 +280,14 @@ class KFAC(object):
         self._rho = rho
 
     @torch.no_grad()
-    def step(self, loss: Optional[torch.Tensor] = None) -> None:
+    def step(self, loss: Optional[torch.Tensor] = None, update_inverses: bool = True) -> None:
+        """
+        Applies preconditioning and executes a step in the optimization process.
+        Args:
+            loss (Optional, tensor): The loss to use if adaptive damping is used.
+            update_inverses (Optional, bool): If true, all inverse covariance matrices are recalculated.
+                If false, the cached covariance matrices are used for preconditioning.
+        """
         if self._adapt_damping and loss is None:
             raise ValueError(
                 'The loss must be passed if adaptive damping is used.')
@@ -296,7 +304,7 @@ class KFAC(object):
         if not self.update_cov_manually:
             self.update_cov()
 
-        raw_updates_and_layers = self._get_raw_updates()
+        raw_updates_and_layers = self._get_raw_updates(update_inverses)
 
         # Apply weight decay
         if self.use_weight_decay:
