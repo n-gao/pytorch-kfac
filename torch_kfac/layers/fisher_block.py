@@ -1,5 +1,6 @@
 from typing import Iterable, Optional, Tuple
 import torch
+from torch import Tensor
 
 from ..utils import MovingAverageVariable, Lock, compute_pi_adjusted_damping, \
     inverse_by_cholesky, kronecker_product, normalize_damping
@@ -26,6 +27,21 @@ class FisherBlock(object):
 
     def update_cov(self, cov_ema_decay: float = 1.0) -> None:
         raise NotImplementedError()
+
+    def update_cov_inv(self, damping: Tensor):
+        """
+        Updates the inverse covariance matrices.
+        Args:
+            damping: The damping (Tikhonov regularization) to apply before calculating the inverse.
+        """
+        if self.activation_covariance is None or self.sensitivity_covariance is None:
+            raise ValueError("Activations or Sensitivity covariance matrix are None")
+
+        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
+        a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
+
+        self._activations_cov_inv = inverse_by_cholesky(act_cov, a_damp)
+        self._sensitivities_cov_inv = inverse_by_cholesky(sen_cov, s_damp)
 
     def compute_damping(self, damping: torch.Tensor, normalization: float = None) -> Tuple[torch.Tensor, torch.Tensor]:
         if normalization is not None:
@@ -65,8 +81,7 @@ class FisherBlock(object):
 
         return self.mat_to_grads(nat_grads)
         
-    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor,
-                                update_inverses: bool) -> Iterable[torch.Tensor]:
+    def multiply_preconditioner(self, grads: Iterable[torch.Tensor], damping: torch.Tensor) -> Iterable[torch.Tensor]:
         """
         Multiplies the gradients with the preconditioning matrix, which corresponds to
         calculating S^{1} * g * A^{-1}, where S is the sensitivities covariance matrix
@@ -80,12 +95,8 @@ class FisherBlock(object):
         Returns:
             The preconditioned gradients.
         """
-        act_cov, sen_cov = self.activation_covariance, self.sensitivity_covariance
-        a_damp, s_damp = self.compute_damping(damping, self.renorm_coeff)
-
-        if (self._activations_cov_inv is None or self._sensitivities_cov_inv is None) or update_inverses:
-            self._activations_cov_inv = inverse_by_cholesky(act_cov, a_damp)
-            self._sensitivities_cov_inv = inverse_by_cholesky(sen_cov, s_damp)
+        if self._activations_cov_inv is None or self._sensitivities_cov_inv is None:
+            self.update_cov_inv(damping)
         
         mat_grads = self.grads_to_mat(grads)
         nat_grads = self._sensitivities_cov_inv @ mat_grads @ self._activations_cov_inv / self.renorm_coeff

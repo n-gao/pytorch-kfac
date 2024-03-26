@@ -168,9 +168,9 @@ class KFAC(object):
             grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
-    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]],
-                                 update_inverses: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
-        return tuple((layer.multiply_preconditioner(grads, self.damping, update_inverses), layer) for (grads, layer) in grads_and_layers)
+    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]])\
+            -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+        return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
 
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         def _update_velocity(grads, layer):
@@ -195,7 +195,7 @@ class KFAC(object):
                 self.damping * linear_term
         return quad_term + linear_term
 
-    def _get_raw_updates(self, update_inverses: bool) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+    def _get_raw_updates(self) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         # Get grads
         grads_and_layers = tuple((layer.grads, layer) for layer in self.blocks if any(
             grad is not None for grad in layer.grads))
@@ -203,7 +203,7 @@ class KFAC(object):
         if self._momentum_type == 'regular':
             # Multiple preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers, update_inverses)
+                grads_and_layers)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
@@ -236,7 +236,7 @@ class KFAC(object):
 
             # Multiply preconditioner
             raw_updates_and_layers = self._multiply_preconditioner(
-                grads_and_layers, update_inverses)
+                grads_and_layers)
 
             # Apply "KL clipping"
             if self.use_norm_constraint:
@@ -280,13 +280,11 @@ class KFAC(object):
         self._rho = rho
 
     @torch.no_grad()
-    def step(self, loss: Optional[torch.Tensor] = None, update_inverses: bool = True) -> None:
+    def step(self, loss: Optional[torch.Tensor] = None) -> None:
         """
         Applies preconditioning and executes a step in the optimization process.
         Args:
             loss (Optional, tensor): The loss to use if adaptive damping is used.
-            update_inverses (Optional, bool): If true, all inverse covariance matrices are recalculated.
-                If false, the cached covariance matrices are used for preconditioning.
         """
         if self._adapt_damping and loss is None:
             raise ValueError(
@@ -304,7 +302,7 @@ class KFAC(object):
         if not self.update_cov_manually:
             self.update_cov()
 
-        raw_updates_and_layers = self._get_raw_updates(update_inverses)
+        raw_updates_and_layers = self._get_raw_updates()
 
         # Apply weight decay
         if self.use_weight_decay:
@@ -327,9 +325,27 @@ class KFAC(object):
 
         self.counter += 1
 
-    def update_cov(self) -> None:
+    def update_cov(self, update_inverses: bool = True) -> None:
+        """
+        Updates the covariance matrices with the data gathered in the forward
+        and backward pass.
+        Args:
+            update_inverses (Optional, bool): If true, the inverse covariance matrices are updated, which
+                are used for preconditioning.
+        """
         for layer in self.blocks:
             layer.update_cov(cov_ema_decay=self._cov_ema_decay)
+
+        if update_inverses:
+            self.update_cov_inv()
+
+    def update_cov_inv(self):
+        """
+        Updates the inverse covariance matrices, which are used for preconditioning.
+        """
+        for layer in self.blocks:
+            layer.update_cov_inv(self.damping)
+
 
     @property
     def covariances(self) -> List[Tuple[torch.Tensor, torch.Tensor]]:

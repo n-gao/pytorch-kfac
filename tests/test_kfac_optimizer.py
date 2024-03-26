@@ -14,7 +14,7 @@ class KfacOptimizerTest(unittest.TestCase):
         self.model = Linear(2, 3, dtype=float64)
         self.input = tensor([[1, 0], [0, 1], [0.5, 0.5], [2, 0.5], [4, 1.1]], dtype=float64)
         self.damping = 1e-1
-        self.preconditioner = KFAC(self.model, 0, self.damping)
+        self.preconditioner = KFAC(self.model, 0, self.damping, update_cov_manually=True)
         self.test_block = self.preconditioner.blocks[0]
 
     def forward_backward_pass(self):
@@ -31,30 +31,30 @@ class KfacOptimizerTest(unittest.TestCase):
         self.exp_activations_cov_inv = inverse_by_cholesky(self.test_block.activation_covariance, a_damp)
         self.exp_sensitivities_cov_inv = inverse_by_cholesky(self.test_block.sensitivity_covariance, s_damp)
 
-    def test_step_should_calculate_inverses_when_none(self):
+    def test_update_cov_should_update_inverses(self):
         self.forward_backward_pass()
-        self.preconditioner.step(update_inverses=False)
+        self.preconditioner.update_cov(True)
         self.calculate_expected_matrices()
         assert_close(self.exp_activations_cov_inv, self.test_block._activations_cov_inv)
         assert_close(self.exp_sensitivities_cov_inv, self.test_block._sensitivities_cov_inv)
 
     def test_step_should_not_recalculate_inverses(self):
         self.forward_backward_pass()
-        self.preconditioner.step()
+        self.preconditioner.update_cov(True)
         self.calculate_expected_matrices()
         self.test_block._activations_cov_inv *= 2
         self.test_block._sensitivities_cov_inv *= 1.5
-        self.preconditioner.step(update_inverses=False)
+        self.preconditioner.update_cov(False)
         assert_close(self.exp_activations_cov_inv * 2, self.test_block._activations_cov_inv)
         assert_close(self.exp_sensitivities_cov_inv * 1.5, self.test_block._sensitivities_cov_inv)
 
     def test_step_should_recalculate_inverses(self):
         self.forward_backward_pass()
-        self.preconditioner.step()
+        self.preconditioner.update_cov(True)
         self.calculate_expected_matrices()
         self.test_block._activations_cov_inv *= 2
         self.test_block._sensitivities_cov_inv *= 1.5
-        self.preconditioner.step(update_inverses=True)
+        self.preconditioner.update_cov(True)
         assert_close(self.exp_activations_cov_inv, self.test_block._activations_cov_inv)
         assert_close(self.exp_sensitivities_cov_inv, self.test_block._sensitivities_cov_inv)
 
