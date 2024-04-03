@@ -28,13 +28,12 @@ class KFAC(object):
                  l2_reg: float = 0.,
 
                  update_cov_manually: bool = False,
-                 center: bool = False,
-                 apply_gradients: bool = True) -> None:
+                 center: bool = False) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
             model (torch.nn.Module): A `torch.nn.Module` to optimize.
-            learning_rate (float): The initial learning rate
+            learning_rate (float): The initial learning rate. Set to zero to disable gradient updates.
             damping (torch.Tensor): This quantity times the identiy matrix is (approximately) added
                 to the matrix being estimated. - This relates to the "trust" in the second order approximation.
             adapt_damping (bool, optional): If True we adapt the damping according to the Levenberg-Marquardt
@@ -59,9 +58,6 @@ class KFAC(object):
                 or when you want your covariances w.r.t. the model distribution rather than the loss function. Defaults to False.
             center (bool, optional): If set to True the activations and sensitivities are centered. This is useful when dealing with
                 unnormalized distributions. Defaults to False.
-            apply_gradients (bool, optional): If set to True, the gradients will be applied to the parameters according
-                to gradient descent and no further optimizer needs to be applied to the model. If set to false, you can
-                use your own first order optimizer (like Adam) to apply the gradients to the model parameters.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -88,7 +84,6 @@ class KFAC(object):
         self._prev_loss = torch.tensor(np.nan, device=device, dtype=dtype)
         self._rho = torch.tensor(np.nan, device=device, dtype=dtype)
         self._min_damping = min_damping
-        self._apply_gradients = apply_gradients
 
         self._weight_decay = weight_decay
         self._l2_reg = l2_reg
@@ -312,7 +307,7 @@ class KFAC(object):
         for precon_grad, layer in raw_updates_and_layers:
             layer.set_gradients(precon_grad)
 
-        if self._apply_gradients:
+        if self.learning_rate != 0:
             # Do gradient step: apply gradients to parameters according to gradient descent.
             for param in self.model.parameters():
                 if param.grad is not None:
