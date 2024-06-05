@@ -4,8 +4,8 @@ from typing import Iterable
 from unittest.mock import MagicMock
 
 import torch
-from torch import float64, tensor, device, allclose, cat, zeros, rand
-from torch.testing import assert_allclose, assert_close
+from torch import float64, tensor, device, cat, rand
+from torch.testing import assert_close
 
 from torch_kfac.layers import FisherBlock
 from torch_kfac.utils import Lock
