@@ -28,7 +28,8 @@ class KFAC(object):
                  l2_reg: float = 0.,
 
                  update_cov_manually: bool = False,
-                 center: bool = False) -> None:
+                 center: bool = False,
+                 enable_pi_correction: bool = True) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
@@ -58,6 +59,8 @@ class KFAC(object):
                 or when you want your covariances w.r.t. the model distribution rather than the loss function. Defaults to False.
             center (bool, optional): If set to True the activations and sensitivities are centered. This is useful when dealing with
                 unnormalized distributions. Defaults to False.
+            enable_pi_correction (bool, optional): If set to true, the pi-correction for the Tikhonov regularization
+                will be calculated.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -101,6 +104,7 @@ class KFAC(object):
                 init_fisher_block(
                     module,
                     center=center,
+                    enable_pi_correction=enable_pi_correction,
                     forward_lock=self.track_forward,
                     backward_lock=self.track_backward
                 )
