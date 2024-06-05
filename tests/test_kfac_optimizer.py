@@ -58,6 +58,16 @@ class KfacOptimizerTest(unittest.TestCase):
         assert_close(self.exp_activations_cov_inv, self.test_block._activations_cov_inv)
         assert_close(self.exp_sensitivities_cov_inv, self.test_block._sensitivities_cov_inv)
 
+    def test_disable_pi_correction(self):
+        """
+        Checks if the enable_pi_correction parameter is correctly copied to the Fisher blocks.
+        """
+        model = Linear(3, 4)
+        preconditioner = KFAC(model, 0.01, tensor(1e-2), enable_pi_correction=False)
+        self.assertEqual(1, len(preconditioner.blocks))
+        self.assertFalse(preconditioner.blocks[0]._enable_pi_correction)
+
+
 
 if __name__ == '__main__':
     unittest.main()
