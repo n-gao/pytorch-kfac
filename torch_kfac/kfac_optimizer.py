@@ -172,7 +172,8 @@ class KFAC(object):
             grads_and_layers, precon_grads_and_layers)
         return scalar_product_pairs(coeff, precon_grads_and_layers)
 
-    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
+    def _multiply_preconditioner(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]])\
+            -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
         return tuple((layer.multiply_preconditioner(grads, self.damping), layer) for (grads, layer) in grads_and_layers)
 
     def _update_velocities(self, grads_and_layers: Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]], decay: float, vec_coeff=1.0) -> Iterable[Tuple[Iterable[torch.Tensor], FisherBlock]]:
@@ -284,6 +285,11 @@ class KFAC(object):
 
     @torch.no_grad()
     def step(self, loss: Optional[torch.Tensor] = None) -> None:
+        """
+        Applies preconditioning and executes a step in the optimization process.
+        Args:
+            loss (Optional, tensor): The loss to use if adaptive damping is used.
+        """
         if self._adapt_damping and loss is None:
             raise ValueError(
                 'The loss must be passed if adaptive damping is used.')
@@ -323,9 +329,27 @@ class KFAC(object):
 
         self.counter += 1
 
-    def update_cov(self) -> None:
+    def update_cov(self, update_inverses: bool = True) -> None:
+        """
+        Updates the covariance matrices with the data gathered in the forward
+        and backward pass.
+        Args:
+            update_inverses (Optional, bool): If true, the inverse covariance matrices are updated, which
+                are used for preconditioning.
+        """
         for layer in self.blocks:
             layer.update_cov(cov_ema_decay=self._cov_ema_decay)
+
+        if update_inverses:
+            self.update_cov_inv()
+
+    def update_cov_inv(self):
+        """
+        Updates the inverse covariance matrices, which are used for preconditioning.
+        """
+        for layer in self.blocks:
+            layer.update_cov_inv(self.damping)
+
 
     @property
     def covariances(self) -> List[Tuple[torch.Tensor, torch.Tensor]]:
