@@ -1,11 +1,20 @@
 import unittest
 from math import sqrt
+from typing import Iterable
+from unittest.mock import MagicMock
 
-from torch import float64, tensor, device
+import torch
+from torch import float64, tensor, device, allclose, cat, zeros
 
 from torch_kfac.layers import FisherBlock
 from torch_kfac.utils import Lock
 
+class MockFisherBlock(FisherBlock):
+    def mat_to_grads(self, mat_grads: torch.Tensor) -> torch.Tensor:
+        return mat_grads
+
+    def grads_to_mat(self, grads: Iterable[torch.Tensor]) -> torch.Tensor:
+        return cat(tuple(grads))
 
 class FisherBlockTest(unittest.TestCase):
 
@@ -15,7 +24,7 @@ class FisherBlockTest(unittest.TestCase):
     sen_cov = tensor([[4, 5, 6], [5, 8, 9], [6, 9, 12]], dtype=float64) / 10
 
     def get_test_block(self) -> FisherBlock:
-        block = FisherBlock(3, 3, dtype=float64, device=device("cpu"))
+        block = MockFisherBlock(3, 3, dtype=float64, device=device("cpu"))
         block._activations_cov.add_to_average(self.act_cov, decay=0)
         block._sensitivities_cov.add_to_average(self.sen_cov, decay=0)
         return block
@@ -48,6 +57,42 @@ class FisherBlockTest(unittest.TestCase):
         expected_damp = damping ** 0.5
         self.assertAlmostEqual(expected_damp, a_damp.item())
         self.assertAlmostEqual(expected_damp, s_damp.item())
+
+    def test_inverse_calculation_check_sensitivities(self):
+        block = self.get_test_block()
+        damping = 1e-1
+        block.update_cov_inv(tensor(damping))
+        expected_sens_cov_inv = tensor([[1.8624, -0.4362, -0.4530],
+                                        [-0.4362, 1.5436, -0.7047],
+                                        [-0.4530, -0.7047, 1.1913]], dtype=float64)
+
+        self.assertTrue(allclose(expected_sens_cov_inv, block._sensitivities_cov_inv, rtol=1e-4))
+
+    def test_inverse_calculation_check_activations(self):
+        block = self.get_test_block()
+        damping = 1e-1
+        block.update_cov_inv(tensor(damping))
+
+        expected_act_cov_inv = tensor([[3.7395, -0.3721, -0.7814],
+                                       [-0.3721, 2.3256, -1.1163],
+                                       [-0.7814, -1.1163, 1.6558]], dtype=float64)
+
+        self.assertTrue(allclose(expected_act_cov_inv, block._activations_cov_inv, rtol=1e-4))
+
+    def test_apply_preconditioner_should_not_recalculate_inverses(self):
+        """
+        Tests that the inverse covariance matrices are not recalculated
+        when the multiply_preconditioner method is called twice.
+        """
+        block = self.get_test_block()
+        test_grads = [zeros((3, 3), dtype=float64)]
+        damping = tensor(1e-1)
+        block.multiply_preconditioner(test_grads, damping)
+
+        block.update_cov_inv = MagicMock()
+        block.multiply_preconditioner(test_grads, damping)
+        self.assertFalse(block.update_cov_inv.called)
+
 
 
 if __name__ == '__main__':
