@@ -3,6 +3,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 
 from .layers import init_fisher_block, FisherBlock
+from .layers.fisher_block_factory import FisherBlockFactory
 from .utils import Lock, inner_product_pairs, scalar_product_pairs
 
 
@@ -28,7 +29,8 @@ class KFAC(object):
                  l2_reg: float = 0.,
 
                  update_cov_manually: bool = False,
-                 center: bool = False) -> None:
+                 center: bool = False,
+                 block_factory: FisherBlockFactory = None) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
@@ -96,9 +98,11 @@ class KFAC(object):
 
         self.track_forward = Lock()
         self.track_backward = Lock()
+        if block_factory is None:
+            block_factory = FisherBlockFactory()
         for module in model.modules():
             self.blocks.append(
-                init_fisher_block(
+                block_factory.create_block(
                     module,
                     center=center,
                     forward_lock=self.track_forward,
