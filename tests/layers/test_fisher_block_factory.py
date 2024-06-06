@@ -36,7 +36,9 @@ class FisherBlockFactoryTest(unittest.TestCase):
         self.forward_lock = Lock()
         self.backward_lock = Lock()
         self.center = False
+        self.enable_pi_correction = True
         self.kwargs = { "center": self.center, "forward_lock": self.forward_lock,
+                        "enable_pi_correction": self.enable_pi_correction,
                         "backward_lock": self.backward_lock }
 
     def test_constructor_when_register_default_blocks_unspecified_should_add_blocks(self):
