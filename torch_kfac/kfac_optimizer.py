@@ -30,12 +30,13 @@ class KFAC(object):
 
                  update_cov_manually: bool = False,
                  center: bool = False,
+                 enable_pi_correction: bool = True,
                  block_factory: FisherBlockFactory = None) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
             model (torch.nn.Module): A `torch.nn.Module` to optimize.
-            learning_rate (float): The initial learning rate
+            learning_rate (float): The initial learning rate. Set to zero to disable gradient updates.
             damping (torch.Tensor): This quantity times the identiy matrix is (approximately) added
                 to the matrix being estimated. - This relates to the "trust" in the second order approximation.
             adapt_damping (bool, optional): If True we adapt the damping according to the Levenberg-Marquardt
@@ -60,6 +61,9 @@ class KFAC(object):
                 or when you want your covariances w.r.t. the model distribution rather than the loss function. Defaults to False.
             center (bool, optional): If set to True the activations and sensitivities are centered. This is useful when dealing with
                 unnormalized distributions. Defaults to False.
+            enable_pi_correction (bool, optional): If set to true, the pi-correction for the Tikhonov regularization
+                will be calculated.
+            block_factory (FisherBlockFactory, optional): A block factory which is used to create the fisher blocks.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -105,6 +109,7 @@ class KFAC(object):
                 block_factory.create_block(
                     module,
                     center=center,
+                    enable_pi_correction=enable_pi_correction,
                     forward_lock=self.track_forward,
                     backward_lock=self.track_backward
                 )
@@ -311,11 +316,11 @@ class KFAC(object):
         for precon_grad, layer in raw_updates_and_layers:
             layer.set_gradients(precon_grad)
 
-        # Do gradient step - if any parameter gradient was not updated by its natural gradient
-        # this will fall back to the normal gradient.
-        for param in self.model.parameters():
-            if param.grad is not None:
-                param.add_(param.grad, alpha=-self.learning_rate)
+        if self.learning_rate != 0:
+            # Do gradient step: apply gradients to parameters according to gradient descent.
+            for param in self.model.parameters():
+                if param.grad is not None:
+                    param.add_(param.grad, alpha=-self.learning_rate)
 
         # Cache previous loss
         if loss is not None:
