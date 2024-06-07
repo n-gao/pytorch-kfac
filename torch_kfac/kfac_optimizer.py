@@ -3,6 +3,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import torch
 
 from .layers import init_fisher_block, FisherBlock
+from .layers.fisher_block_factory import FisherBlockFactory
 from .utils import Lock, inner_product_pairs, scalar_product_pairs
 
 
@@ -29,7 +30,8 @@ class KFAC(object):
 
                  update_cov_manually: bool = False,
                  center: bool = False,
-                 enable_pi_correction: bool = True) -> None:
+                 enable_pi_correction: bool = True,
+                 block_factory: FisherBlockFactory = None) -> None:
         """Creates the KFAC Optimizer object.
 
         Args:
@@ -61,6 +63,7 @@ class KFAC(object):
                 unnormalized distributions. Defaults to False.
             enable_pi_correction (bool, optional): If set to true, the pi-correction for the Tikhonov regularization
                 will be calculated.
+            block_factory (FisherBlockFactory, optional): A block factory which is used to create the fisher blocks.
         """
 
         legal_momentum_types = ['regular', 'adam']
@@ -99,9 +102,11 @@ class KFAC(object):
 
         self.track_forward = Lock()
         self.track_backward = Lock()
+        if block_factory is None:
+            block_factory = FisherBlockFactory()
         for module in model.modules():
             self.blocks.append(
-                init_fisher_block(
+                block_factory.create_block(
                     module,
                     center=center,
                     enable_pi_correction=enable_pi_correction,
